@@ -1,0 +1,125 @@
+---
+title: 'Modeling Nikes Daily and Monthly Stock Returns [Period: 2007-2016]'
+author: "Manav Dalmiya"
+date: "4/2/2017"
+output: html_document
+---
+
+Clear Memory + Import Packages
+```{r}
+rm(list=ls(all=TRUE))
+
+library(stats)
+library(zoo)
+library(nortest)
+library(tseries)
+library(moments)
+library(forecast)
+library(rugarch)
+library(FinTS)
+```
+
+###Nike Daily + Monthly Returns [Period: 2007-2016]: Import and Take Log Difference
+```{r}
+# Import Nike's Daily Returns
+nike <- get.hist.quote(instrument = "nke", compression = "d", start = "2007-01-01", end = "2016-12-31", quote = "AdjClose", retclass = c("zoo"))
+
+# Log Difference of Daily Returns
+Nike_dailyret<-100*diff(log(nike))
+```
+
+###Nike Daily Returns: ARMA(p,q) using BIC
+
+Nike's daily returns and squared daily returns reject the null hypothesis of no serial correlation (p < 0.05). There is evidence of ARCH at lags of 2, 7, and 28.
+```{r}
+auto.arima(Nike_dailyret, D=0, test=c("adf"), ic=c("bic"))
+Box.test(Nike_dailyret, lag = 3, type = c("Ljung-Box"), fitdf = 0)
+Box.test(Nike_dailyret^2, lag = 3, type = c("Ljung-Box"), fitdf = 0)
+ArchTest(Nike_dailyret, lags=2, demean=TRUE)
+ArchTest(Nike_dailyret, lags=7, demean=TRUE)
+ArchTest(Nike_dailyret, lags=28, demean=TRUE)
+```
+
+###Estimate GARCH(1,1) Model for each error process using ARMA model
+
+Nike - Daily Returns: GARCH(1,1)
+```{r}
+# Model Normal 1 - GARCH(1,1)
+modN1<-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)), 
+mean.model = list(armaOrder = c(0, 0), include.mean = TRUE, archm = FALSE), distribution.model = "norm")
+```
+
+ARCH(0,0)
+```{r}
+modN1est_Nike<-ugarchfit(modN1, Nike_dailyret)
+show(modN1est_Nike)
+```
+
+
+###Nike Daily Returns: Mean, Variance, Skewness, Kurtosis
+```{r}
+mean(Nike_dailyret)
+var(Nike_dailyret)
+skewness(Nike_dailyret)
+kurtosis(Nike_dailyret)-3
+rnike=coredata(Nike_dailyret)
+shapiro.test(rnike)
+ad.test(rnike)
+jarque.bera.test(rnike)
+```
+
+```{r}
+resids_Nike<-residuals(modN1est_Nike)
+sigma_Nike<-sigma(modN1est_Nike)
+nized_Nike<-resids_Nike/sigma_Nike
+mean(nized_Nike)
+var(nized_Nike)
+skewness(nized_Nike)
+kurtosis(nized_Nike)-3
+shapiro.test(coredata(nized_Nike))
+ad.test(coredata(nized_Nike))
+jarque.bera.test(nized_Nike)
+```
+
+Nike: Daily Returns - Mean, Variance, Skewness, Kurtosis
+
+The mean of Nike’s logged daily returns is 0.06220, which indicates that shares increased at a rate of 6.220%/day. The variance is 3.188, which is larger than var(normal dist.) = 1. The skewness is +0.2581, which indicates the daily returns are right skewed. The kurtosis is 7.590, which indicates the distribution is leptokurtic.
+
+Nike GARCH(1,1): Daily Returns - Mean, Variance, Skewness, Kurtosis
+
+The mean of Nike’s GARCH(1,1) model is -0.02857, which indicates that shares decreased at a rate of -2.857%/day. This is much lower than the non-GARCH model. The variance is 0.9965, which is approximately equal to var(normal dist.) = 1. The skewness is +0.3496, which indicates the GARCH daily returns are more rightly skewed than the non-GARCH model. The kurtosis is 8.258, which indicates the distribution is more leptokurtic than the non-GARCH model.
+
+Nike: Shapiro-Wilk, Anderson-Darling, Jarque-Bera
+
+Each test returns p-values < 2.2e-16. This supports the hypothesis that daily stock returns are serially uncorrelated.
+
+Nike GARCH(1,1): Shapiro-Wilk, Anderson-Darling, Jarque-Bera
+
+Each test returns p-values < 2.2e-16. This supports the hypothesis that the GARCH(1,1) daily stock returns are serially uncorrelated.
+
+
+
+```{r}
+estden_nike <- density(rnike, bw="SJ", kernel = c("epanechnikov"))
+plot(estden_nike,main="Daily Nike Returns Density and Normal Density", col="blue")
+xnike <- seq(min(rnike), max(rnike), 0.0001)
+lines(xnike, dnorm(xnike, mean=mean(rnike), sd=sqrt(var(rnike))), lty="dashed")
+```
+
+
+```{r}
+estden_Nike <- density(nized_Nike, bw="SJ", kernel = c("epanechnikov"))
+plot(estden_Nike,main="Density of Normalised Resids. from GARCH(1,1) with Normal Cond. Dens.", col="blue")
+x <- seq(-4, 4, 0.01)
+lines(x, dnorm(x, mean=0, sd=1), lty="dashed")
+
+```
+
+Nike: Estimated Density against Normal Distribition.
+
+As the kurtosis suggests, Nike’s estimated density function is leptokurtic with respect to the normal distribution.
+
+Nike GARCH(1,1): Estimated Density against Normal Distribition.
+
+The Nike GARCH(1,1)’s estimated density function has a smaller bandwidth than the non-GARCH mode. It is also much more leptokurtic than the non-GARCH model.
+
